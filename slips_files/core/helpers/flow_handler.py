@@ -5,6 +5,7 @@ import json
 from dataclasses import asdict
 from typing import Tuple
 
+from slips_files.common.abstracts.iasync_task_manager import AsyncTaskManager
 from slips_files.core.flows.suricata import SuricataFile
 from slips_files.common.slips_utils import utils
 
@@ -61,13 +62,14 @@ class Publisher:
         self.create_task(self.db.publish, "new_software", json.dumps(to_send))
 
 
-class FlowHandler:
+class FlowHandler(AsyncTaskManager):
     """
     Each flow seen by slips will use a different instance of this class
     depending on the type of the flow (conn, dns, etc.)
     """
 
     def __init__(self, db, symbol_handler, flow):
+        AsyncTaskManager.__init__(self)
         self.db = db
         self.publisher = Publisher(self.db)
         self.flow = flow

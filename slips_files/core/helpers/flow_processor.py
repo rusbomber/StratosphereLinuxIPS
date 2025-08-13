@@ -35,6 +35,7 @@ import netifaces
 import validators
 from ipaddress import IPv4Network, IPv6Network, IPv4Address, IPv6Address
 
+from slips_files.common.abstracts.iasync_task_manager import AsyncTaskManager
 from slips_files.common.printer import Printer
 from slips_files.common.slips_utils import utils
 from slips_files.common.style import green
@@ -58,7 +59,7 @@ SUPPORTED_INPUT_TYPES = {
 }
 
 
-class FlowProcessor:
+class FlowProcessor(AsyncTaskManager):
     name = "FlowProcessor"
 
     def __init__(
@@ -75,7 +76,7 @@ class FlowProcessor:
         flush_db=False,
         start_redis_server=False,
     ):
-
+        AsyncTaskManager.__init__(self)
         self.conf = conf
         self.read_configuration()
         self.logger = logger
@@ -96,6 +97,7 @@ class FlowProcessor:
         self.gw_ip = None
         # flag to know which flow is the start of the pcap/file
         self.first_flow = True
+        self.tasks = []
 
     @classmethod
     async def create(cls, **kwargs):
@@ -649,8 +651,7 @@ class FlowProcessor:
                 flow = self.input_handler_obj.process_line(line)
                 if not flow:
                     continue
-
-                self.create_task(self.add_flow_to_profile, flow)
+                await self.add_flow_to_profile(flow)
                 self.create_task(self.handle_setting_local_net, flow)
                 self.create_task(self.db.increment_processed_flows)
             except Exception as e:
@@ -662,6 +663,7 @@ class FlowProcessor:
                     1,
                 )
 
+        await self.shutdown_gracefully()
         self.print(
             f"Stopping. Total lines read: {self.rec_lines}",
             log_to_logfiles_only=True,

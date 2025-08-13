@@ -403,9 +403,7 @@ class HTTPAnalyzer(IAsyncModule):
         conn_log_flow: Optional[dict]
         conn_log_flow = await utils.get_original_conn_flow(flow, self.db)
         if not conn_log_flow:
-            print("@@@@@@@@@@@@@@@@ !!!!!!!!!!!!!!1 sleeping 15 ")
             await asyncio.sleep(15)
-            print("@@@@@@@@@@@@@@@@ !!!!!!!!!! done sleeping 15!")
             conn_log_flow = await utils.get_original_conn_flow(flow, self.db)
             if not conn_log_flow:
                 return

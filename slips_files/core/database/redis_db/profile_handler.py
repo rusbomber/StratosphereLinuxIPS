@@ -166,7 +166,6 @@ class ProfileHandler:
         The idea is that from the uid of a netflow, you can access which other
         type of info is related to that uid
         """
-        # print(f"@@@@@@@@@@@@@@@@ add_out_http is calledd")
         http_flow = {
             "profileid": profileid,
             "twid": twid,
