@@ -1259,9 +1259,7 @@ class ProfileHandler:
         :param user_agent: dict containing user_agent, os_type,
         os_name, and agent_name
         """
-        await self.r.hset(
-            profileid, "first user-agent", json.dumps(user_agent)
-        )
+        await self.r.hset(profileid, "first user-agent", user_agent)
 
     async def get_user_agents_count(self, profileid) -> int:
         """
@@ -1319,17 +1317,22 @@ class ProfileHandler:
         """Returns the first user agent used by the given profile"""
         return (await self.r.hmget(profileid, "first user-agent"))[0]
 
-    async def get_user_agent_from_profile(self, profileid) -> str:
+    async def get_user_agent_from_profile(self, profileid):
         """
         Returns a dict of {'os_name', 'os_type', 'browser': , 'user_agent': }
         used by a certain profile or None
         """
-        if user_agent := await self.get_first_user_agent(profileid):
-            # User agents may be OpenSSH_8.6, no need to deserialize them
-            if "{" in user_agent:
-                user_agent = json.loads(user_agent)
-            return user_agent
-        return None
+        user_agent = await self.get_first_user_agent(profileid)
+        if user_agent is None:
+            return None
+
+        if isinstance(user_agent, str):
+            try:
+                parsed = json.loads(user_agent)
+                return parsed
+            except (ValueError, TypeError):
+                pass
+        return user_agent
 
     async def mark_profile_as_dhcp(self, profileid):
         """

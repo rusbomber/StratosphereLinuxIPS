@@ -200,7 +200,7 @@ class FlowProcessor:
                 # software and weird.log flows are allowed to not have a daddr
                 return False
 
-        await self.get_gateway_info(flow)
+        self.create_task(self.get_gateway_info, flow)
 
         # Check if the flow is whitelisted and we should not process it
         if await self.whitelist.is_whitelisted_flow(flow):
@@ -218,9 +218,9 @@ class FlowProcessor:
 
         # Create profiles for all ips we see
         await self.db.add_profile(profileid, flow.starttime)
-        await self.store_features_going_out(flow, flow_parser)
+        self.create_task(self.store_features_going_out, flow, flow_parser)
         if self.analysis_direction == "all":
-            await self.handle_in_flow(flow)
+            self.create_task(self.handle_in_flow, flow)
 
         if await self.db.is_cyst_enabled():
             # print the added flow as a form of debugging feedback for
@@ -363,7 +363,7 @@ class FlowProcessor:
         """
         function for adding the features going out of the profile
         """
-        await self.store_first_seen_ts(flow.starttime)
+        self.create_task(self.store_first_seen_ts, flow.starttime)
 
         cases = {
             "flow": flow_parser.handle_conn,
@@ -385,18 +385,23 @@ class FlowProcessor:
             "tunnel": flow_parser.handle_tunnel,
         }
         try:
+            handler = cases[flow.type_]
             # call the function that handles this flow
-            await cases[flow.type_]()
+            self.create_task(handler)
         except KeyError:
             for supported_type in cases:
                 if supported_type in flow.type_:
-                    await cases[supported_type]()
+                    handler = cases[supported_type]
+                    self.create_task(handler)
             return False
 
         # if the flow type matched any of the ifs above,
         # mark this profile as modified
-        await self.db.mark_profile_tw_as_modified(
-            flow_parser.profileid, flow_parser.twid, ""
+        self.create_task(
+            self.db.mark_profile_tw_as_modified,
+            flow_parser.profileid,
+            flow_parser.twid,
+            "",
         )
 
     async def store_features_going_in(self, profileid: str, twid: str, flow):
@@ -424,25 +429,34 @@ class FlowProcessor:
         tupleid = f"{saddr_as_obj}-{flow.dport}-{flow.proto}"
         role = "Server"
         # create the intuple
-        await self.db.add_tuple(profileid, twid, tupleid, symbol, role, flow)
+        self.create_task(
+            self.db.add_tuple, profileid, twid, tupleid, symbol, role, flow
+        )
 
         # Add the srcip and srcport
-        await self.db.add_ips(profileid, twid, flow, role)
+        self.create_task(self.db.add_ips, profileid, twid, flow, role)
         port_type = "Src"
-        await self.db.add_port(profileid, twid, flow, role, port_type)
+        self.create_task(
+            self.db.add_port, profileid, twid, flow, role, port_type
+        )
 
         # Add the dstport
         port_type = "Dst"
-        await self.db.add_port(profileid, twid, flow, role, port_type)
+        self.create_task(
+            self.db.add_port, profileid, twid, flow, role, port_type
+        )
 
         # Add the flow with all the fields interpreted
-        await self.db.add_flow(
+        self.create_task(
+            self.db.add_flow,
             flow,
             profileid=profileid,
             twid=twid,
             label=self.label,
         )
-        await self.db.mark_profile_tw_as_modified(profileid, twid, "")
+        self.create_task(
+            self.db.mark_profile_tw_as_modified, profileid, twid, ""
+        )
 
     async def handle_in_flow(self, flow):
         """
@@ -636,9 +650,9 @@ class FlowProcessor:
                 if not flow:
                     continue
 
-                await self.add_flow_to_profile(flow)
-                await self.handle_setting_local_net(flow)
-                await self.db.increment_processed_flows()
+                self.create_task(self.add_flow_to_profile, flow)
+                self.create_task(self.handle_setting_local_net, flow)
+                self.create_task(self.db.increment_processed_flows)
             except Exception as e:
                 self.print_traceback()
                 self.print(

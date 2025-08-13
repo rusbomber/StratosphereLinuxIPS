@@ -201,7 +201,7 @@ class Profiler(IAsyncModule, IObservable):
         otherwise this channel will get a msg only when
         whitelist.conf is modified and saved to disk
         """
-        await self.whitelist.update()
+        self.create_task(self.whitelist.update())
 
     def mark_process_as_done_processing(self):
         """

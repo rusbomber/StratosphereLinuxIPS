@@ -58,7 +58,7 @@ then you should only build the pigeon using:
 - If you installed Slips without the submodules then you should download and build the pigeon using:
 
 ```
-git submodule init && git submodule update && cd p2p4slips && go build
+    git submodule init && git submodule update && cd p2p4slips && go build
 ```
 
 The p2p binary should now be in ```p2p4slips/``` dir and slips will be able to find it.

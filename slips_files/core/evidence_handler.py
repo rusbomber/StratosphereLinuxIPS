@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # Stratosphere Linux IPS. A machine-learning Intrusion Detection System
 # Copyright (C) 2021 Sebastian Garcia
+import asyncio
 
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -186,22 +187,26 @@ class EvidenceHandler(IAsyncModule):
         except Exception:
             self.handle_unable_to_log()
 
-    def add_to_log_file(self, data):
+    async def add_to_log_file(self, data):
         """
         Add a new evidence line to the alerts.log and other log files if
-        logging is enabled.
+        logging is enabled. Non-blocking.
         """
         try:
-            # write to alerts.log
-            self.logfile.write(data)
-            if not data.endswith("\n"):
-                self.logfile.write("\n")
-            self.logfile.flush()
+            # Offload file operations to a thread to avoid blocking the event loop
+            await asyncio.to_thread(self._write_log, data)
         except KeyboardInterrupt:
             return True
         except Exception:
             self.print("Error in add_to_log_file()")
             self.print(traceback.format_exc(), 0, 1)
+
+    def _write_log(self, data):
+        """Actual sync file writing logic."""
+        self.logfile.write(data)
+        if not data.endswith("\n"):
+            self.logfile.write("\n")
+        self.logfile.flush()
 
     async def log_alert(self, alert: Alert, blocked=False):
         """
@@ -227,11 +232,11 @@ class EvidenceHandler(IAsyncModule):
             f"{alert.timewindow.number}. (real time {now})"
         )
         # log to alerts.log
-        self.add_to_log_file(alert_description)
+        self.create_task(self.add_to_log_file, alert_description)
         # log to alerts.json
-        await self.add_alert_to_json_log_file(alert)
+        self.create_task(self.add_alert_to_json_log_file, alert)
 
-    def shutdown_gracefully(self):
+    async def shutdown_gracefully(self):
         self.logfile.close()
         self.jsonfile.close()
 
@@ -361,7 +366,9 @@ class EvidenceHandler(IAsyncModule):
         for evidence in tw_evidence.values():
             evidence: Evidence
             evidence: dict = utils.to_dict(evidence)
-            await self.db.publish("export_evidence", json.dumps(evidence))
+            self.create_task(
+                self.db.publish, "export_evidence", json.dumps(evidence)
+            )
 
     def is_blocking_modules_supported(self) -> bool:
         """
@@ -387,7 +394,7 @@ class EvidenceHandler(IAsyncModule):
         in the db only, without printing it to cli.
         """
 
-        await self.db.set_alert(alert, evidence_causing_the_alert)
+        self.create_task(self.db.set_alert, alert, evidence_causing_the_alert)
         is_blocked: bool = await self.decide_blocking(
             alert.profile.ip, alert.timewindow
         )
@@ -402,7 +409,10 @@ class EvidenceHandler(IAsyncModule):
             # in this tw.
             return
 
-        await self.send_to_exporting_module(evidence_causing_the_alert)
+        self.create_task(
+            self.send_to_exporting_module, evidence_causing_the_alert
+        )
+
         alert_to_print: str = (
             await self.formatter.format_evidence_for_printing(
                 alert, evidence_causing_the_alert
@@ -412,14 +422,16 @@ class EvidenceHandler(IAsyncModule):
         self.print(f"{alert_to_print}", 1, 0)
 
         if self.popup_alerts:
-            self.show_popup(alert)
+            self.create_task(self.show_popup, alert)
 
         if is_blocked:
-            await self.db.mark_profile_and_timewindow_as_blocked(
-                str(alert.profile), str(alert.timewindow)
+            self.create_task(
+                self.db.mark_profile_and_timewindow_as_blocked,
+                str(alert.profile),
+                str(alert.timewindow),
             )
 
-        await self.log_alert(alert, blocked=is_blocked)
+        self.create_task(self.log_alert, alert, blocked=is_blocked)
 
     async def decide_blocking(
         self, ip_to_block: str, timewindow: TimeWindow
@@ -449,7 +461,7 @@ class EvidenceHandler(IAsyncModule):
             "tw": timewindow.number,
         }
         blocking_data = json.dumps(blocking_data)
-        await self.db.publish("new_blocking", blocking_data)
+        self.create_task(self.db.publish, "new_blocking", blocking_data)
         return True
 
     async def increment_attack_counter(
@@ -484,8 +496,10 @@ class EvidenceHandler(IAsyncModule):
             evidence_threat_level,
         )
 
-    def show_popup(self, alert: Alert):
-        alert_description: str = self.formatter.get_printable_alert(alert)
+    async def show_popup(self, alert: Alert):
+        alert_description: str = await self.formatter.get_printable_alert(
+            alert
+        )
         self.notify.show_popup(alert_description)
 
     def should_stop(self) -> bool:
@@ -550,10 +564,13 @@ class EvidenceHandler(IAsyncModule):
             flow_datetime,
         )
         # Add the evidence to alerts.log
-        self.add_to_log_file(evidence_to_log)
+        self.create_task(self.add_to_log_file, evidence_to_log)
 
-        await self.increment_attack_counter(
-            evidence.profile.ip, evidence.victim, evidence_type
+        self.create_task(
+            self.increment_attack_counter,
+            evidence.profile.ip,
+            evidence.victim,
+            evidence_type,
         )
 
         past_evidence_ids: List[str] = (
@@ -572,13 +589,16 @@ class EvidenceHandler(IAsyncModule):
             )
 
         # add to alerts.json
-        await self.add_evidence_to_json_log_file(
+        self.create_task(
+            self.add_evidence_to_json_log_file,
             evidence,
             accumulated_threat_level,
         )
 
         evidence_dict: dict = utils.to_dict(evidence)
-        await self.db.publish("report_to_peers", json.dumps(evidence_dict))
+        self.create_task(
+            self.db.publish, "report_to_peers", json.dumps(evidence_dict)
+        )
 
         # This is the part to detect if the accumulated
         # evidence was enough for generating a detection
@@ -602,7 +622,7 @@ class EvidenceHandler(IAsyncModule):
                     accumulated_threat_level=accumulated_threat_level,
                     correl_id=list(tw_evidence.keys()),
                 )
-                await self.handle_new_alert(alert, tw_evidence)
+                self.create_task(self.handle_new_alert, alert, tw_evidence)
 
     async def new_blame_msg_handler(self, msg: dict):
         data = msg["data"]
@@ -630,7 +650,7 @@ class EvidenceHandler(IAsyncModule):
         # "evaluation": { "score": 0.9, "confidence": 0.6 }}
         ip_info = {"p2p4slips": evaluation}
         ip_info["p2p4slips"].update({"ts": time.time()})
-        await self.db.store_blame_report(key, evaluation)
+        self.create_task(self.db.store_blame_report, key, evaluation)
 
         blocking_data = {
             "ip": key,
@@ -639,7 +659,7 @@ class EvidenceHandler(IAsyncModule):
             "from": True,
         }
         blocking_data = json.dumps(blocking_data)
-        await self.db.publish("new_blocking", blocking_data)
+        self.create_task(self.db.publish, "new_blocking", blocking_data)
 
     def pre_main(self):
         self.print(f"Using threshold: {green(self.detection_threshold)}")

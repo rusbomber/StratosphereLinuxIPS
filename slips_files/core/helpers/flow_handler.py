@@ -27,7 +27,7 @@ class Publisher:
             "twid": await self.db.get_timewindow(flow.starttime, profileid),
             "flow": asdict(flow),
         }
-        await self.db.publish("new_dhcp", json.dumps(to_send))
+        self.create_task(self.db.publish, "new_dhcp", json.dumps(to_send))
 
     async def new_mac(self, mac: str, ip: str):
         """
@@ -48,7 +48,7 @@ class Publisher:
 
         # send the  MAC to IP_Info module to get vendor info about it
         to_send = {"MAC": mac, "profileid": f"profile_{ip}"}
-        await self.db.publish("new_MAC", json.dumps(to_send))
+        self.create_task(self.db.publish, "new_MAC", json.dumps(to_send))
 
     async def new_software(self, profileid, flow):
         """
@@ -58,7 +58,7 @@ class Publisher:
             "flow": asdict(flow),
             "twid": await self.db.get_timewindow(flow.starttime, profileid),
         }
-        await self.db.publish("new_software", json.dumps(to_send))
+        self.create_task(self.db.publish, "new_software", json.dumps(to_send))
 
 
 class FlowHandler:
@@ -117,27 +117,49 @@ class FlowHandler:
         # Change symbol for its internal data. Symbol is a tuple and is
         # confusing if we ever change the API
         # Add the out tuple
-        await self.db.add_tuple(
-            self.profileid, self.twid, tupleid, symbol, role, self.flow
+        self.create_task(
+            self.db.add_tuple,
+            self.profileid,
+            self.twid,
+            tupleid,
+            symbol,
+            role,
+            self.flow,
         )
 
         # Add the dstip
-        await self.db.add_ips(self.profileid, self.twid, self.flow, role)
+        self.create_task(
+            self.db.add_ips, self.profileid, self.twid, self.flow, role
+        )
         # Add the dstport
         port_type = "Dst"
-        await self.db.add_port(
-            self.profileid, self.twid, self.flow, role, port_type
+        self.create_task(
+            self.db.add_port,
+            self.profileid,
+            self.twid,
+            self.flow,
+            role,
+            port_type,
         )
 
         # Add the srcport
         port_type = "Src"
-        await self.db.add_port(
-            self.profileid, self.twid, self.flow, role, port_type
+        self.create_task(
+            self.db.add_port,
+            self.profileid,
+            self.twid,
+            self.flow,
+            role,
+            port_type,
         )
         # store the original flow as benign in sqlite
-        await self.db.add_flow(self.flow, self.profileid, self.twid, "benign")
+        self.create_task(
+            self.db.add_flow, self.flow, self.profileid, self.twid, "benign"
+        )
 
-        await self.db.add_mac_addr_to_profile(self.profileid, self.flow.smac)
+        self.create_task(
+            self.db.add_mac_addr_to_profile, self.profileid, self.flow.smac
+        )
 
         if await self.db.is_running_non_stop():
             # to avoid publishing duplicate MACs, when running on
@@ -145,35 +167,49 @@ class FlowHandler:
             # MACs from there only
             return
 
-        await self.publisher.new_mac(self.flow.smac, self.flow.saddr)
-        await self.publisher.new_mac(self.flow.dmac, self.flow.daddr)
+        self.create_task(
+            self.publisher.new_mac, self.flow.smac, self.flow.saddr
+        )
+        self.create_task(
+            self.publisher.new_mac, self.flow.dmac, self.flow.daddr
+        )
 
     async def handle_dns(self):
-        await self.db.add_out_dns(self.profileid, self.twid, self.flow)
-        await self.db.add_altflow(
-            self.flow, self.profileid, self.twid, "benign"
+        self.create_task(
+            self.db.add_out_dns, self.profileid, self.twid, self.flow
+        )
+        self.create_task(
+            self.db.add_altflow, self.flow, self.profileid, self.twid, "benign"
         )
 
     async def handle_http(self):
-        await self.db.add_out_http(self.profileid, self.twid, self.flow)
-        await self.db.add_altflow(
-            self.flow, self.profileid, self.twid, "benign"
+        self.create_task(
+            self.db.add_out_http, self.profileid, self.twid, self.flow
+        )
+        self.create_task(
+            self.db.add_altflow, self.flow, self.profileid, self.twid, "benign"
         )
 
     async def handle_ssl(self):
-        await self.db.add_out_ssl(self.profileid, self.twid, self.flow)
-        await self.db.add_altflow(
-            self.flow, self.profileid, self.twid, "benign"
+        self.create_task(
+            self.db.add_out_ssl, self.profileid, self.twid, self.flow
+        )
+        self.create_task(
+            self.db.add_altflow, self.flow, self.profileid, self.twid, "benign"
         )
 
     async def handle_ssh(self):
-        await self.db.add_out_ssh(self.profileid, self.twid, self.flow)
-        await self.db.add_altflow(
-            self.flow, self.profileid, self.twid, "benign"
+        self.create_task(
+            self.db.add_out_ssh, self.profileid, self.twid, self.flow
+        )
+        self.create_task(
+            self.db.add_altflow, self.flow, self.profileid, self.twid, "benign"
         )
 
     async def handle_notice(self):
-        await self.db.add_out_notice(self.profileid, self.twid, self.flow)
+        self.create_task(
+            self.db.add_out_notice, self.profileid, self.twid, self.flow
+        )
 
         if "Gateway_addr_identified" in self.flow.note:
             # foirst check if the gw ip and mac are set by
@@ -191,16 +227,16 @@ class FlowHandler:
                 if gw_mac:
                     await self.db.set_default_gateway("MAC", gw_mac)
 
-        await self.db.add_altflow(
-            self.flow, self.profileid, self.twid, "benign"
+        self.create_task(
+            self.db.add_altflow, self.flow, self.profileid, self.twid, "benign"
         )
 
     async def handle_ftp(self):
         if used_port := self.flow.used_port:
-            await self.db.set_ftp_port(used_port)
+            self.create_task(self.db.set_ftp_port, used_port)
 
-        await self.db.add_altflow(
-            self.flow, self.profileid, self.twid, "benign"
+        self.create_task(
+            self.db.add_altflow, self.flow, self.profileid, self.twid, "benign"
         )
 
     async def handle_smtp(self):
@@ -210,50 +246,61 @@ class FlowHandler:
             "twid": self.twid,
         }
         to_send = json.dumps(to_send)
-        await self.db.publish("new_smtp", to_send)
+        self.create_task(self.db.publish, "new_smtp", to_send)
 
-        await self.db.add_altflow(
-            self.flow, self.profileid, self.twid, "benign"
+        self.create_task(
+            self.db.add_altflow, self.flow, self.profileid, self.twid, "benign"
         )
 
     async def handle_software(self):
-        await self.db.add_software_to_profile(self.profileid, self.flow)
+        self.create_task(
+            self.db.add_software_to_profile, self.profileid, self.flow
+        )
         epoch_time = utils.convert_ts_format(
             self.flow.starttime, "unixtimestamp"
         )
         self.flow.starttime = epoch_time
-        await self.publisher.new_software(self.profileid, self.flow)
+        self.create_task(
+            self.publisher.new_software, self.profileid, self.flow
+        )
 
-        await self.db.add_altflow(
-            self.flow, self.profileid, self.twid, "benign"
+        self.create_task(
+            self.db.add_altflow, self.flow, self.profileid, self.twid, "benign"
         )
 
     async def handle_dhcp(self):
         # send this to ip_info module to get vendor info about this MAC
-        await self.publisher.new_mac(
+        self.create_task(
+            self.publisher.new_mac,
             self.flow.smac or False,
             self.flow.saddr,
         )
 
-        await self.db.add_mac_addr_to_profile(self.profileid, self.flow.smac)
+        self.create_task(
+            self.db.add_mac_addr_to_profile, self.profileid, self.flow.smac
+        )
 
         if self.flow.server_addr:
-            await self.db.store_dhcp_server(self.flow.server_addr)
-            await self.db.mark_profile_as_dhcp(self.profileid)
+            self.create_task(self.db.store_dhcp_server, self.flow.server_addr)
+            self.create_task(self.db.mark_profile_as_dhcp, self.profileid)
 
         epoch_time = utils.convert_ts_format(
             self.flow.starttime, "unixtimestamp"
         )
         self.flow.starttime = epoch_time
 
-        await self.publisher.new_dhcp(self.profileid, self.flow)
+        self.create_task(self.publisher.new_dhcp, self.profileid, self.flow)
         for uid in self.flow.uids:
             # we're modifying the copy of self.flow
             # the goal is to store a copy of this flow for each uid in self.flow.uids
             flow = self.flow
             flow.uid = uid
-            await self.db.add_altflow(
-                self.flow, self.profileid, self.twid, "benign"
+            self.create_task(
+                self.db.add_altflow,
+                self.flow,
+                self.profileid,
+                self.twid,
+                "benign",
             )
 
     async def handle_files(self):
@@ -273,9 +320,9 @@ class FlowHandler:
         }
 
         to_send = json.dumps(to_send)
-        await self.db.publish("new_downloaded_file", to_send)
-        await self.db.add_altflow(
-            self.flow, self.profileid, self.twid, "benign"
+        self.create_task(self.db.publish, "new_downloaded_file", to_send)
+        self.create_task(
+            self.db.add_altflow, self.flow, self.profileid, self.twid, "benign"
         )
 
     async def handle_arp(self):
@@ -286,12 +333,18 @@ class FlowHandler:
         }
         # send to arp module
         to_send = json.dumps(to_send)
-        await self.db.publish("new_arp", to_send)
-        await self.db.add_mac_addr_to_profile(self.profileid, self.flow.smac)
-        await self.publisher.new_mac(self.flow.dmac, self.flow.daddr)
-        await self.publisher.new_mac(self.flow.smac, self.flow.saddr)
-        await self.db.add_altflow(
-            self.flow, self.profileid, self.twid, "benign"
+        self.create_task(self.db.publish, "new_arp", to_send)
+        self.create_task(
+            self.db.add_mac_addr_to_profile, self.profileid, self.flow.smac
+        )
+        self.create_task(
+            self.publisher.new_mac, self.flow.dmac, self.flow.daddr
+        )
+        self.create_task(
+            self.publisher.new_mac, self.flow.smac, self.flow.saddr
+        )
+        self.create_task(
+            self.db.add_altflow, self.flow, self.profileid, self.twid, "benign"
         )
 
     async def handle_weird(self):
@@ -304,9 +357,9 @@ class FlowHandler:
             "flow": asdict(self.flow),
         }
         to_send = json.dumps(to_send)
-        await self.db.publish("new_weird", to_send)
-        await self.db.add_altflow(
-            self.flow, self.profileid, self.twid, "benign"
+        self.create_task(self.db.publish, "new_weird", to_send)
+        self.create_task(
+            self.db.add_altflow, self.flow, self.profileid, self.twid, "benign"
         )
 
     async def handle_tunnel(self):
@@ -316,8 +369,8 @@ class FlowHandler:
             "flow": asdict(self.flow),
         }
         to_send = json.dumps(to_send)
-        await self.db.publish("new_tunnel", to_send)
+        self.create_task(self.db.publish, "new_tunnel", to_send)
 
-        await self.db.add_altflow(
-            self.flow, self.profileid, self.twid, "benign"
+        self.create_task(
+            self.db.add_altflow, self.flow, self.profileid, self.twid, "benign"
         )
